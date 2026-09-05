@@ -40,6 +40,25 @@ public static class PluginIndexMatcher
     public static PluginIndexEntry? FirstFor(PluginIndex? index, DiscoveredGame game)
         => EntriesFor(index, game).FirstOrDefault();
 
+    /// <summary>Das Plugin, das dem User als „⬇ Installieren"-Karte angeboten
+    /// werden darf — oder null.
+    ///
+    /// <para>Der Unterschied zu <see cref="FirstFor"/>: ein Plugin das bereits
+    /// GELADEN ist, wird nie angeboten. Steht der Content-Bereich trotz
+    /// geladenem Plugin ohne Tabs da, fehlt dem Plugin nur dieses eine Spiel in
+    /// seiner DetectedGames-Liste — dann ist ein zweiter Download die falsche
+    /// Antwort, das Reconcile-Sicherheitsnetz die richtige (v1.28.2).</para></summary>
+    public static PluginIndexEntry? InstallOfferFor(
+        PluginIndex? index, DiscoveredGame game, IEnumerable<string> loadedPluginIds)
+    {
+        var entry = FirstFor(index, game);
+        if (entry is null) return null;
+        return loadedPluginIds.Any(id =>
+            string.Equals(id, entry.Id, StringComparison.OrdinalIgnoreCase))
+            ? null
+            : entry;
+    }
+
     /// <summary>Alle Engine-Slugs fuer die ueberhaupt ein Plugin im Index steht.
     /// Vorberechnet fuer den Sidebar-Sweep in <c>RefreshPluginStates</c>.</summary>
     public static HashSet<string> AvailableEngines(PluginIndex? index)

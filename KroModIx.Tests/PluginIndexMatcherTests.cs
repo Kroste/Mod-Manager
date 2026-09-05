@@ -88,6 +88,44 @@ public class PluginIndexMatcherTests
     }
 
     [Fact]
+    public void InstallOffer_bietet_ein_fehlendes_Plugin_an()
+    {
+        var idx = Index(Entry("kroste.renpyassist", engines: new[] { "renpy" }));
+        PluginIndexMatcher.InstallOfferFor(idx, EngineGame("renpy"), Array.Empty<string>())!
+            .Id.Should().Be("kroste.renpyassist");
+    }
+
+    [Fact]
+    public void InstallOffer_bietet_ein_GELADENES_Plugin_nicht_nochmal_an()
+    {
+        // Regression v1.28.2: die Kachel stand ohne Tabs da, weil das geladene
+        // Plugin dieses eine Spiel noch nicht in DetectedGames hatte. Eine
+        // Install-Karte waere hier die falsche Antwort — ein Klick wuerde
+        // dasselbe Plugin ein zweites Mal von GitHub holen. Zustaendig ist der
+        // Reconcile-Pfad, den die Karte mit ihrem fruehen return uebersprang.
+        var idx = Index(Entry("kroste.renpyassist", engines: new[] { "renpy" }));
+
+        PluginIndexMatcher.InstallOfferFor(idx, EngineGame("renpy"),
+            new[] { "kroste.renpyassist" }).Should().BeNull();
+    }
+
+    [Fact]
+    public void InstallOffer_ignoriert_Gross_Kleinschreibung_der_Plugin_Id()
+    {
+        var idx = Index(Entry("kroste.renpyassist", engines: new[] { "renpy" }));
+        PluginIndexMatcher.InstallOfferFor(idx, EngineGame("renpy"),
+            new[] { "KROSTE.RENPYASSIST" }).Should().BeNull();
+    }
+
+    [Fact]
+    public void InstallOffer_laesst_sich_von_anderen_geladenen_Plugins_nicht_beirren()
+    {
+        var idx = Index(Entry("kroste.renpyassist", engines: new[] { "renpy" }));
+        PluginIndexMatcher.InstallOfferFor(idx, EngineGame("renpy"),
+            new[] { "kroste.icarus", "kroste.ls25" })!.Id.Should().Be("kroste.renpyassist");
+    }
+
+    [Fact]
     public void Kein_Index_geladen_liefert_leer()
     {
         PluginIndexMatcher.EntriesFor(null, EngineGame("renpy")).Should().BeEmpty();

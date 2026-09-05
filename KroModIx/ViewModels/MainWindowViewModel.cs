@@ -453,7 +453,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             var fresh = await Task.Run(() => _discovery.Discover(), ct).ConfigureAwait(false);
 
-            await Dispatcher.UIThread.InvokeAsync(() =>
+            // async-Lambda: der Diff meldet neue Spiele per await an die Plugins
+            // (v1.28.2) — die InvokeAsync-Ueberladung fuer Func<Task> haelt die
+            // Reihenfolge, der Aufrufer wartet also wirklich bis alles durch ist.
+            await Dispatcher.UIThread.InvokeAsync(async () =>
             {
                 var freshKeys = new HashSet<string>(fresh.Select(g => g.Key), StringComparer.Ordinal);
                 var currentKeys = new HashSet<string>(_allGames.Select(g => g.Key), StringComparer.Ordinal);
@@ -497,6 +500,21 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                     // beim nächsten Start ist es weg.
                     if (_settings.Current.PluginAutoCleanupOnGameUninstall)
                         _ = RunAutoCleanupAsync(fresh, removed, ct);
+
+                    // v1.28.2: Spiele die HIER reinkommen, muessen den geladenen
+                    // Plugins genauso gemeldet werden wie ein Manual-Add — sonst
+                    // fehlen sie in LoadedPlugin.DetectedGames, MatchesGame
+                    // schlaegt fehl und der Content-Bereich zeigt statt der
+                    // Plugin-Tabs eine Install-Karte fuer ein laengst
+                    // installiertes Plugin. Betraf real den Ordner-Scan-Import,
+                    // der erst in der naechsten Session als Discovery-Delta
+                    // ankommt.
+                    foreach (var g in added)
+                    {
+                        try { await _pluginActivator.NotifyGameAddedAsync(g, ct).ConfigureAwait(true); }
+                        catch (Exception ex)
+                        { Log.Warn(ex, "NotifyGameAddedAsync warf fuer {Dir}", g.InstallDir); }
+                    }
 
                     // v1.28.1: neu aufgetauchte Spiele koennen ein Plugin
                     // brauchen das lokal fehlt (frisch installiertes Steam-
@@ -1150,7 +1168,28 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         if (loaded is null)
         {
             // Plugin verfügbar, aber nicht installiert? → Install-Karte statt Placeholder.
-            var indexEntry = FindIndexEntryFor(entry);
+            var indexEntry = PluginIndexMatcher.InstallOfferFor(
+                _indexCache, entry.Source, _pluginActivator.Loaded.Select(l => l.Manifest.Id));
+
+            // v1.28.2: Eine Install-Karte fuer ein BEREITS GELADENES Plugin ist
+            // immer falsch — der Klick wuerde dasselbe Plugin nochmal von
+            // GitHub holen. Dass wir hier stehen heisst dann naemlich nicht
+            // „Plugin fehlt", sondern „Plugin ist da, kennt dieses eine Spiel
+            // nur noch nicht" (Kachel kam ueber den Discovery-Refresh rein,
+            // ohne dass NotifyGameAddedAsync lief). Dafuer ist das Reconcile-
+            // Sicherheitsnetz weiter unten zustaendig — also Eintrag
+            // verwerfen und dorthin durchfallen.
+            //
+            // Regression aus v1.28.1: davor matchte FindIndexEntryFor nur ueber
+            // SteamAppId und lieferte fuer Engine-Games immer null, wodurch der
+            // Reconcile-Zweig zwangslaeufig erreicht wurde. Mit dem Engine-Match
+            // greift das frueher — und das `return` unter der Install-Karte hat
+            // das Sicherheitsnetz uebersprungen.
+            if (indexEntry is null && FindIndexEntryFor(entry) is { } suppressed)
+                Log.Info("Install-Karte fuer {PluginId} unterdrueckt — Plugin ist geladen, "
+                    + "kennt '{Game}' nur noch nicht. Reconcile uebernimmt.",
+                    suppressed.Id, entry.DisplayName);
+
             if (indexEntry is not null)
             {
                 InstallCard = new InstallCardViewModel(

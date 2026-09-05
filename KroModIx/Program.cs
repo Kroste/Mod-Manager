@@ -17,12 +17,45 @@ internal static class Program
     /// Warnungen des Parsers erst nach dem NLog-Setup landen.</summary>
     public static AppLaunchOptions LaunchOptions { get; private set; } = new();
 
+    /// <summary>Setzt die NLog-Variable <c>logDir</c> auf
+    /// <c>&lt;StateRoot&gt;/logs</c>. Schlaegt das fehl (Rechte, volle Platte),
+    /// bleibt der Default aus der nlog.config stehen — ein kaputter Log-Pfad
+    /// darf den App-Start nie verhindern.</summary>
+    private static void ConfigureLogDirectory()
+    {
+        try
+        {
+            var dir = System.IO.Path.Combine(AppPaths.StateRoot, "logs");
+            System.IO.Directory.CreateDirectory(dir);
+            // Indexer, nicht Add() — die nlog.config bringt „logDir" schon als
+            // Default mit, Add() wuerde auf dem vorhandenen Key werfen.
+            var cfg = LogManager.Configuration;
+            if (cfg is null) return;
+            cfg.Variables["logDir"] = dir;
+            LogManager.Configuration = cfg;
+        }
+        catch
+        {
+            // Bewusst still: hier laeuft noch kein Logger, dem wir das melden
+            // koennten. Die Konsolen-Ausgabe funktioniert unabhaengig davon.
+        }
+    }
+
     [STAThread]
     public static void Main(string[] args)
     {
         // MaskingLayoutRenderer VOR dem ersten Logger-Aufruf registrieren —
         // sonst wird ${masked:...} nicht aufgelöst und die Log-Zeile ist kaputt.
         MaskingLayoutRenderer.Register();
+
+        // v1.28.2: Log-Verzeichnis auf einen garantiert beschreibbaren Pfad
+        // setzen, ebenfalls vor dem ersten Logger-Aufruf. Die nlog.config hatte
+        // ein relatives „logs/" — das loest NLog gegen das Arbeitsverzeichnis
+        // auf, und beim AppImage ist das der read-only Mount bzw. der Ordner,
+        // aus dem der User gestartet hat. Ergebnis: gar kein Log, genau dann
+        // wenn man eins braucht. StateRoot ist XDG_STATE_HOME/KroModIx
+        // (Linux) bzw. %LOCALAPPDATA%\KroModIx\state (Windows).
+        ConfigureLogDirectory();
 
         var log = LogManager.GetCurrentClassLogger();
         log.Info("KroModIx start (args: {Args})", string.Join(" ", args));
